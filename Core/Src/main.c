@@ -37,6 +37,52 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+//Redefines buttons for simplicity
+// Positive x direction is forward
+//Positive y direction is left
+//positive z direction is up
+//Left movement port and pin
+#define LEFT_Pin A1_Pin
+#define RIGHT_Port A2_GPIO_Port
+//Right movement port and pin
+#define RIGHT_Port A1_GPIO_Port
+#define RIGHT_Pin A2_PIN
+//Backward movement port and pin
+#define BACK_Pin A3_Pin
+#define BACK_Port A3_GPIO_Port
+//Forward movement port and pin
+#define FOR_Port A4_Pin
+#define FOR_Pin A4_GPIO_Port
+//Up down output port and pin
+#define ZPUL_Port D5_GPIO_Port
+#define ZPUL_Pin D5_Pin
+//Up down direction port and pin
+#define ZDIR_Port D4_GPIO_Port
+#define ZDIR_Pin D4_Pin
+//Forward back output
+#define XPUL_Port D3_GPIO_Port
+#define XPUL_Pin D3_Pin
+// Forward back direction
+#define XDIR_Port D2_GPIO_Port
+#define XDIR_Pin D2_Pin
+// Left right output
+#define YPUL_Port D1_GPIO_Port
+#define YPUL_Pin D1_Pin
+//Left Right direction
+#define YDIR_Port D0_GPIO_Port
+#define YDIR_Pin D0_Pin
+// Z axis proximity sensor
+#define ZPROX_Port D8_GPIO_Port
+#define ZPROX_Pin D8_Pin
+// Y axis proximity sensor
+#define YPROX_Port D9_GPIO_Port
+#define YPROX_Pin D9_Pin
+//x axis proximity sensor
+#define XPROX_Port D10_GPIO_Port
+#define XPROX_Pin D10_Pin
+
+
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -44,6 +90,81 @@
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+
+/*What period should we use to achieve 22 m/s?
+ * T = ( L(lead in mm/rev)* Steps_Per_Rev(200 for out gantry system) )/ (Desired Speed: 22 mm/s) = steps/sec
+ * L = 8mm, 200 steps per rev, V = 22 mm/s : 550 steps/ sec
+ * Take reciprocal: 0.018 seconds/step = 1.8 ms
+ * Use 1.8ms for high and low
+ *
+ */
+
+
+
+#define stepInterval 1.8f
+
+
+GPIO_PinState leftButtonState;
+GPIO_PinState rightButtonState;
+GPIO_PinState forwardButtonState;
+GPIO_PinState backButtonState;
+//Records time since recent step to produce signal
+uint32_t lastXStep = 0;
+uint32_t lastYStep = 0;
+uint32_t lastZStep = 0;
+
+//Alternates between on and off to produce signal
+uint8_t xStepState = 0;
+uint8_t yStepState = 0;
+uint8_t zStepState = 0;
+
+//State of 2mm proximity
+uint8_t zProximityDetected = 0;
+uint8_t yProximityDetected = 0;
+uint8_t xProximityDetected = 0;
+
+//Determines calibration state of each axis
+
+uint8_t zCalibrated = 0;
+uint8_t yCalibrated = 0;
+uint8_t zCalibrated = 0;
+
+// enums that state machine utilizes to calibrate
+
+typedef enum
+{
+	Z_IDLE,
+	Z_MOVING_DOWN,
+	Z_WAITING,
+	Z_MOVING_UP
+} ZState;
+
+typedef enum
+{
+	Y_IDLE,
+	Y_MOVING_RIGHT,
+	Y_WAITING,
+	Y_MOVING_LEFT
+} YState;
+
+typedef enum
+{
+	X_IDLE,
+	X_MOVING_BACK,
+	X_WAITING,
+	X_MOVING_FORWARD
+} XState;
+
+//Initialize states
+ZState = IDLE;
+YState = IDLE;
+XState = IDLE;
+
+//Global origin values
+
+uint8_32 yOrigin;
+uint8_32 yOrigin;
+uint8_32 zOrigin;
 
 /* USER CODE END PV */
 
@@ -102,8 +223,39 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+
   while (1)
   {
+	  leftButtonState = HAL_GPIO_ReadPin(LEFT_Port, LEFT_Pin);
+	  rightButtonState = HAL_GPIO_ReadPin(RIGHT_Port, RIGHT_Pin);
+	  backButtonState = HAL_GPIO_ReadPin(BACK_Port, Back_Pin);
+	  forwardButtonState = HAL_GPIO_ReadPin(FORWARD_Port, FORWARD_Pin);
+	  //Loop until right button is pressed
+	  while(rightButtonState == GPIO_PIN_RESET)
+	  {
+		  if (leftButtonState == GPIO_PIN_SET)
+		  {
+			  if (HAL_GetTick() - lastYStep >= stepInterval)
+			  {
+				  yStepState = !yStepState;
+				  HAL_GPIO_WritePin(LEFT_Port, LEFT_Pin, yStepState? GPIO_PIN_SET : GPIO_PIN_RESET);
+				  lastYStep = HAL_GetTick();
+			  }
+		  }
+		  if (forwardButtonState == GPIO_PIN_SET)
+		  {
+			  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, GPIO_PIN_RESET);
+			  if (HAL_GetTick() - lastYStep >= stepInterval)
+			  {
+				  yStepState = !yStepState;
+				  HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, yStepState? GPIO_PIN_SET : GPIO_PIN_RESET);
+				  lastYStep = HAL_GetTick();
+			  }
+		  }
+	  }
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -399,6 +551,162 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+//Calibrates the Z-Origin
+void Z_Calibration()
+{
+	  //Begin Z state machine
+	  switch(ZState)
+	  {
+	  	  case Z_IDLE:
+		  {
+	  		  //Not necessary here
+		  }
+	  	  case Z_MOVING_DOWN:
+		  {
+			  //Changed by interrupt
+			  if (zProximityDetected)
+			  {
+				  // Turns motor off
+				  HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+
+				  //resets step state to zero for future use
+				  zStepState = 0;
+
+
+				  zState = Z_MOVE_LEFT;
+			  }
+			  // Moves down
+			  else
+			  {
+				  //Sets direction to down (hopefully)
+				  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
+
+				  //3.6 ms clock
+				  if (HAL_GetTick() - zLastStepTime >= stepInterval)
+				  {
+					  //switches step state (on or off)
+					  zStepState = !zStepState;
+
+					  HAL_GPIO_WritePin(ZPUL_Port, Z_Pin, zStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+					  //Resets last step time
+					  zLastStepTime = HAL_GetTick();
+				  }
+			  }
+			  break;
+		  }
+	  	  case Z_WAITING:
+		  {
+	  		  //Not necessary here
+		  }
+	  	  case Z_MOVING_UP:
+		  {
+			  //Move upward for 0.5 seconds to reach 10 mm
+			  //Set direction to up
+			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
+			  if (HAL_GetTick() - zLastStepTime <= 500)
+			  {
+				  zCalibrated = 1;
+			  }
+		  }
+
+	  }
+}
+
+void Y_Calibration()
+{
+	  //Begin Z state machine
+	  switch(yState)
+	  {
+	  	  case Y_IDLE:
+		  {
+	  		  if (zCalibrated == 1)
+	  		  {
+	  			  yState = Y_MOVING_RIGHT;
+	  		  }
+		  }
+	  	  case Y_MOVING_RIGHT:
+		  {
+			  //Changed by interrupt
+			  if (zProximityDetected)
+			  {
+				  // Turns motor off
+				  HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+
+				  //resets step state to zero for future use
+				  zStepState = 0;
+
+
+				  zState = Z_MOVE_LEFT;
+			  }
+			  // Moves down
+			  else
+			  {
+				  //Sets direction to down (hopefully)
+				  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
+
+				  //3.6 ms clock
+				  if (HAL_GetTick() - zLastStepTime >= stepInterval)
+				  {
+					  //switches step state (on or off)
+					  zStepState = !zStepState;
+
+					  HAL_GPIO_WritePin(ZPUL_Port, Z_Pin, zStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+					  //Resets last step time
+					  zLastStepTime = HAL_GetTick();
+				  }
+			  }
+			  break;
+		  }
+	  	  case Y_WAITING:
+		  {
+	  		  //Not necessary here
+		  }
+	  	  case Z_MOVING_LEFT:
+		  {
+			  //Move upward for 0.5 seconds to reach 10 mm
+			  //Set direction to up
+			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
+			  if (HAL_GetTick() - zLastStepTime <= 500)
+			  {
+				  zCalibrated = 1;
+			  }
+		  }
+
+	  }
+}
+
+void Z_Calibration()
+{
+
+}
+
+//Interrupt triggered externally
+void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
+{
+	UNUSED(GPIO_Pin);
+
+	// Z-axis proximity pin triggered
+	if (GPIO_Pin == ZPROX_Pin)
+	{
+		//State machine reads this
+		zProxmityDetected = 1;
+		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+
+	}
+	//Symmetrical
+	else if (GPIO_Pin == YPROX_Pin)
+	{
+		yProximityDetected = 1;
+
+		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+	}
+	else if (GPIO_Pin == XPROX_Pin)
+	{
+		xProximityDetected = 1;
+		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+	}
+
+}
 /* USER CODE END 4 */
 
 /**
