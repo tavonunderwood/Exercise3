@@ -1,0 +1,9 @@
+//How to commit to an existing repository in GitHub
+// Download GitHub Desktop
+//Create an account if need be 
+//Go to repository you want to work on on github website 
+//Click green code button
+//Copy the URL under "HTTPS" to clipboard
+//Go back to GitHub Desktop -> File -> Clone Repository
+//Paste repo URL and clone 
+//For STM, make sure it is cloned to the proper workspace that you regularly use or plan to use
