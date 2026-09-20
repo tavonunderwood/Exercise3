@@ -254,6 +254,10 @@ int main(void)
 			  }
 		  }
 	  }
+	 //Calibrate the sensors
+	  Z_Calibration();
+	  Y_Calibration();
+	  X_Calibration();
 
 
     /* USER CODE END WHILE */
@@ -573,7 +577,7 @@ void Z_Calibration()
 				  zStepState = 0;
 
 
-				  zState = Z_MOVE_LEFT;
+				  zState = Z_MOVING_UP;
 			  }
 			  // Moves down
 			  else
@@ -603,7 +607,7 @@ void Z_Calibration()
 			  //Move upward for 0.5 seconds to reach 10 mm
 			  //Set direction to up
 			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
-			  if (HAL_GetTick() - zLastStepTime <= 500)
+			  if (HAL_GetTick() - zLastStepTime >= 500)
 			  {
 				  zCalibrated = 1;
 			  }
@@ -627,32 +631,32 @@ void Y_Calibration()
 	  	  case Y_MOVING_RIGHT:
 		  {
 			  //Changed by interrupt
-			  if (zProximityDetected)
+			  if (yProximityDetected)
 			  {
 				  // Turns motor off
-				  HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+				  HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, GPIO_PIN_RESET);
 
 				  //resets step state to zero for future use
-				  zStepState = 0;
+				  yStepState = 0;
 
 
-				  zState = Z_MOVE_LEFT;
+				  yState = Y_MOVE_LEFT;
 			  }
 			  // Moves down
 			  else
 			  {
 				  //Sets direction to down (hopefully)
-				  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
+				  HAL_GPIO_WritePin(YDIR_Port, YDIR_Pin, GPIO_PIN_RESET);
 
 				  //3.6 ms clock
-				  if (HAL_GetTick() - zLastStepTime >= stepInterval)
+				  if (HAL_GetTick() - yLastStepTime >= stepInterval)
 				  {
 					  //switches step state (on or off)
-					  zStepState = !zStepState;
+					  yStepState = !yStepState;
 
-					  HAL_GPIO_WritePin(ZPUL_Port, Z_Pin, zStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+					  HAL_GPIO_WritePin(YPUL_Port, Y_Pin, yStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
 					  //Resets last step time
-					  zLastStepTime = HAL_GetTick();
+					  yLastStepTime = HAL_GetTick();
 				  }
 			  }
 			  break;
@@ -661,23 +665,78 @@ void Y_Calibration()
 		  {
 	  		  //Not necessary here
 		  }
-	  	  case Z_MOVING_LEFT:
+	  	  case Y_MOVING_LEFT:
 		  {
 			  //Move upward for 0.5 seconds to reach 10 mm
 			  //Set direction to up
 			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
-			  if (HAL_GetTick() - zLastStepTime <= 500)
+			  if (HAL_GetTick() - zLastStepTime >= 500)
 			  {
 				  zCalibrated = 1;
 			  }
 		  }
-
 	  }
 }
 
-void Z_Calibration()
+void X_Calibration()
 {
+	  //Begin Z state machine
+	  switch(xState)
+	  {
+	  	  case X_IDLE:
+		  {
+	  		  if (yCalibrated == 1)
+	  		  {
+	  			  xState = X_MOVING_BACK;
+	  		  }
+		  }
+	  	  case Y_MOVING_BACK:
+		  {
+			  //Changed by interrupt
+			  if (xProximityDetected)
+			  {
+				  // Turns motor off
+				  HAL_GPIO_WritePin(XPUL_Port, XPUL_Pin, GPIO_PIN_RESET);
 
+				  //resets step state to zero for future use
+				  xStepState = 0;
+
+				  xState = X_MOVING_FORWARD;
+			  }
+			  // Moves down
+			  else
+			  {
+				  //Sets direction to down (hopefully)
+				  HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_RESET);
+
+				  //3.6 ms clock
+				  if (HAL_GetTick() - xLastStepTime >= stepInterval)
+				  {
+					  //switches step state (on or off)
+					  xStepState = !xStepState;
+
+					  HAL_GPIO_WritePin(XPUL_Port, X_Pin, xStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+					  //Resets last step time
+					  xLastStepTime = HAL_GetTick();
+				  }
+			  }
+			  break;
+		  }
+	  	  case X_WAITING:
+		  {
+	  		  //Not necessary here
+		  }
+	  	  case X_MOVING_FORWARD:
+		  {
+			  //Move upward for 0.5 seconds to reach 10 mm
+			  //Set direction to up
+			  HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_SET);
+			  if (HAL_GetTick() - xLastStepTime >= 500)
+			  {
+				  xCalibrated = 1;
+			  }
+		  }
+	  }
 }
 
 //Interrupt triggered externally
