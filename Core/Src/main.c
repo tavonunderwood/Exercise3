@@ -174,8 +174,12 @@ volatile uint8_t zMotorRunning = 0;
 volatile uint8_t yMotorRunning = 0;
 volatile uint8_t xMotorRunning = 0;
 
-//For moving 10mm
+//For moving up 10mm
 volatile uint32_t zPulseCount = 0;
+
+//for moving left 10mm
+volatile uint32_t yPulseCount = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -231,6 +235,45 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  //Startup Loop
+  while (1)
+  {
+      leftButtonState = HAL_GPIO_ReadPin(LEFT_Port, LEFT_Pin);
+
+      rightButtonState = HAL_GPIO_ReadPin(RIGHT_Port, RIGHT_Pin);
+
+      forwardButtonState = HAL_GPIO_ReadPin(FORWARD_Port, FORWARD_Pin);
+
+      if (rightButtonState == GPIO_PIN_RESET)
+      {
+    	  xMotorRunning = 0;
+    	  yMotorRunning = 0;
+          break;
+      }
+
+      if (leftButtonState == GPIO_PIN_RESET)
+      {
+    	  HAL_GPIO_WritePin(YDIR_Port, YDIR_Pin, GPIO_PIN_SET);
+    	  yMotorRunning = 1;
+      }
+      else
+      {
+    	  yMotorRunning = 0;
+    	  HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, GPIO_PIN_RESET);
+      }
+
+      if (forwardButtonState == GPIO_PIN_RESET)
+      {
+          // move X forward
+    	  HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_SET);
+    	  xMotorRunning = 1;
+      }
+      else
+      {
+    	  xMotorRunning = 0;
+    	  HAL_GPIO_WritePin(XPUL_Port, XPUL_Pin, GPIO_PIN_RESET);
+      }
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -239,49 +282,9 @@ int main(void)
 
   while (1)
   {
-	  while (1)
-	  {
-	      leftButtonState = HAL_GPIO_ReadPin(LEFT_Port, LEFT_Pin);
 
-	      rightButtonState = HAL_GPIO_ReadPin(RIGHT_Port, RIGHT_Pin);
-
-	      forwardButtonState = HAL_GPIO_ReadPin(FORWARD_Port, FORWARD_Pin);
-
-	      if (rightButtonState == GPIO_PIN_RESET)
-	      {
-	          break;
-	      }
-
-	      if (leftButtonState == GPIO_PIN_RESET)
-	      {
-	          if (stepTimerFlag)
-	          {
-
-	          }
-
-	      }
-	      else
-	      {
-	          HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, GPIO_PIN_RESET);
-	          yStepState = 0;
-	      }
-
-	      if (forwardButtonState == GPIO_PIN_RESET)
-	      {
-	          // move X forward
-	      }
-	      else
-	      {
-	          HAL_GPIO_WritePin(XPUL_Port,
-	                            XPUL_Pin,
-	                            GPIO_PIN_RESET);
-	          xStepState = 0;
-	      }
-	  }
 	 //Calibrate the sensors
-	  Z_Calibration();
-	  Y_Calibration();
-	  X_Calibration();
+	 Calibration();
 
 
     /* USER CODE END WHILE */
@@ -625,47 +628,92 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 //Calibrates the Z-Origin
-void Z_Calibration()
+void Calibration()
 {
 	switch (calState)
 	{
 	    case CAL_Z_DOWN:
 	    	HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
 	    	zMotorRunning  = 1;
+	    	if (zProximityDetected)
+	    	{
+	    		calState = CAL_Z_UP;
+	    	}
 	        break;
 
 	    case CAL_Z_UP:
+	    	//Incremented in timer interrupt
+	    	zPulseCount = 0;
 
+	    	//Up direction
+	    	HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
 
-	        // move exactly 10 mm
+	    	zMotorRunning = 1;
+
+	        // move exactly 10 mm, 50 pulses per mm so 500 pulses per 10mm
 	    	if (zPulseCount >= 500)
 	    	{
 	    	    zMotorRunning = 0;
 
-	    	    HAL_GPIO_WritePin(ZPUL_Port,
-	    	                      ZPUL_Pin,
-	    	                      GPIO_PIN_RESET);
+	    	    HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
 
 	    	    zPosition = 0;
 
 	    	    calState = CAL_Y_RIGHT;
 	    	}
 	        break;
-
+	        //Move right until D9 interrupt
 	    case CAL_Y_RIGHT:
-	        // move right until D9 interrupt
+	    	//Sets y-direction to right
+	    	HAL_GPIO_WritePin(YDIR_Port, YDIR_Pin, GPIO_PIN_RESET);
+	    	//Turns on y motor (timer interrupt checks this)
+	    	yMotorRunning = 1;
+	    	if (yProximityDetected)
+	    	{
+	    		calState = CAL_Y_LEFT;
+	    	}
 	        break;
-
+	    //Move 100 mm left
 	    case CAL_Y_LEFT:
-	        // move exactly 100 mm
+	        yPulseCount = 0;
+
+	        HAL_GPIO_WritePin(YDIR_Port, YDIR_Pin, GPIO_PIN_SET);
+	        if (yPulseCount >= 5000)
+	        {
+	        	yMotorRunning = 0;
+
+	        	HAL_GPIO_WritePin(YPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+
+	        	yPosition = 0;
+
+	        	calState = CAL_X_BACK;
+	        }
 	        break;
 
 	    case CAL_X_BACK:
 	        // move backward until D10 interrupt
+	    	HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_RESET);
+
+	    	xMotorRunning = 1;
+	    	if (xProximityDetected = 1)
+	    	{
+	    		calState = CAL_X_FORWARD;
+	    	}
 	        break;
 
 	    case CAL_X_FORWARD:
 	        // move measured distance
+	    	HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_SET);
+
+	    	if (xPulseCount >= 5000)
+	    	{
+	    		xMotorRunning = 0;
+
+	    		HAL_GPIO_WritePin(XPUL_Port, XDIR_Pin, GPIO_PIN_RESET);
+
+	    		calState = CAL_WAIT;
+	    	}
+
 	        break;
 
 	    case CAL_WAIT:
@@ -697,11 +745,14 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 		yProximityDetected = 1;
 
 		yMotorRunning = 0;
+
+		HAL_GPIO_WritePin(YPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
 	}
 	else if (GPIO_Pin == XPROX_Pin)
 	{
 		xProximityDetected = 1;
 		xMotorRunning = 0;
+		HAL_GPIO_WritePin(XPUL_Port, XPUL_Pin, GPIO_PIN_RESET);
 	}
 
 }
