@@ -42,50 +42,49 @@
 //Positive y direction is left
 //positive z direction is up
 //Left movement port and pin
-#define LEFT_Pin A1_Pin
-#define RIGHT_Port A2_GPIO_Port
+#define LEFT_Port      A1_GPIO_Port
+#define LEFT_Pin       A1_Pin
 //Right movement port and pin
-#define RIGHT_Port A1_GPIO_Port
-#define RIGHT_Pin A2_PIN
+#define RIGHT_Port     A2_GPIO_Port
+#define RIGHT_Pin      A2_Pin
 //Backward movement port and pin
-#define BACK_Pin A3_Pin
-#define BACK_Port A3_GPIO_Port
+#define BACK_Port      A3_GPIO_Port
+#define BACK_Pin       A3_Pin
 //Forward movement port and pin
-#define FOR_Port A4_Pin
-#define FOR_Pin A4_GPIO_Port
+#define FORWARD_Port   A4_GPIO_Port
+#define FORWARD_Pin    A4_Pin
 //Up down output port and pin
-#define ZPUL_Port D5_GPIO_Port
-#define ZPUL_Pin D5_Pin
-//Up down direction port and pin
-#define ZDIR_Port D4_GPIO_Port
-#define ZDIR_Pin D4_Pin
-//Forward back output
-#define XPUL_Port D3_GPIO_Port
-#define XPUL_Pin D3_Pin
-// Forward back direction
-#define XDIR_Port D2_GPIO_Port
-#define XDIR_Pin D2_Pin
+#define ZPUL_Port      D5_GPIO_Port
+#define ZPUL_Pin       D5_Pin
+#define ZDIR_Port      D4_GPIO_Port
+#define ZDIR_Pin       D4_Pin
+//Forward back output/direction
+#define XPUL_Port      D3_GPIO_Port
+#define XPUL_Pin       D3_Pin
+#define XDIR_Port      D2_GPIO_Port
+#define XDIR_Pin       D2_Pin
 // Left right output
-#define YPUL_Port D1_GPIO_Port
-#define YPUL_Pin D1_Pin
-//Left Right direction
-#define YDIR_Port D0_GPIO_Port
-#define YDIR_Pin D0_Pin
+#define YPUL_Port      D1_GPIO_Port
+#define YPUL_Pin       D1_Pin
+#define YDIR_Port      D0_GPIO_Port
+#define YDIR_Pin       D0_Pin
 // Z axis proximity sensor
-#define ZPROX_Port D8_GPIO_Port
-#define ZPROX_Pin D8_Pin
+#define ZPROX_Port     D8_GPIO_Port
+#define ZPROX_Pin      D8_Pin
 // Y axis proximity sensor
-#define YPROX_Port D9_GPIO_Port
-#define YPROX_Pin D9_Pin
+#define YPROX_Port     D9_GPIO_Port
+#define YPROX_Pin      D9_Pin
 //x axis proximity sensor
-#define XPROX_Port D10_GPIO_Port
-#define XPROX_Pin D10_Pin
+#define XPROX_Port     D10_GPIO_Port
+#define XPROX_Pin      D10_Pin
 
 
 
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart1;
 
@@ -119,53 +118,64 @@ uint8_t yStepState = 0;
 uint8_t zStepState = 0;
 
 //State of 2mm proximity
-uint8_t zProximityDetected = 0;
-uint8_t yProximityDetected = 0;
-uint8_t xProximityDetected = 0;
+volatile uint8_t zProximityDetected = 0;
+volatile uint8_t yProximityDetected = 0;
+volatile uint8_t xProximityDetected = 0;
 
 //Determines calibration state of each axis
 
 uint8_t zCalibrated = 0;
 uint8_t yCalibrated = 0;
-uint8_t zCalibrated = 0;
+uint8_t xCalibrated = 0;
 
 // enums that state machine utilizes to calibrate
 
 typedef enum
 {
-	Z_IDLE,
-	Z_MOVING_DOWN,
-	Z_WAITING,
-	Z_MOVING_UP
-} ZState;
+    CAL_Z_DOWN,
+    CAL_Z_UP,
+    CAL_Y_RIGHT,
+    CAL_Y_LEFT,
+    CAL_X_BACK,
+    CAL_X_FORWARD,
+    CAL_WAIT,
+    CAL_DONE
+} CalibrationState;
 
-typedef enum
-{
-	Y_IDLE,
-	Y_MOVING_RIGHT,
-	Y_WAITING,
-	Y_MOVING_LEFT
-} YState;
-
-typedef enum
-{
-	X_IDLE,
-	X_MOVING_BACK,
-	X_WAITING,
-	X_MOVING_FORWARD
-} XState;
-
+CalibrationState calState = CAL_Z_DOWN;
 //Initialize states
-ZState = IDLE;
-YState = IDLE;
-XState = IDLE;
+ZState zState = Z_IDLE;
+YState yState = Y_IDLE;
+XState xState = X_IDLE;
 
 //Global origin values
 
-uint8_32 yOrigin;
-uint8_32 yOrigin;
-uint8_32 zOrigin;
+int32_t xPosition = 0;
+int32_t yPosition = 0;
+int32_t zPosition = 0;
 
+//Defines step parameters
+#define FULL_STEPS_PER_REV    200
+#define MICROSTEP             2
+#define PULSES_PER_REV        (FULL_STEPS_PER_REV * MICROSTEP)
+
+#define LEAD_MM_PER_REV       8
+#define PULSES_PER_MM         (PULSES_PER_REV / LEAD_MM_PER_REV)
+
+#define Z_BACKOFF_MM          10
+#define Y_BACKOFF_MM          100
+
+#define Z_BACKOFF_PULSES      (Z_BACKOFF_MM * PULSES_PER_MM)
+#define Y_BACKOFF_PULSES      (Y_BACKOFF_MM * PULSES_PER_MM)
+
+//For hardware interrupt
+//Can now turn this on and off to control motor
+volatile uint8_t zMotorRunning = 0;
+volatile uint8_t yMotorRunning = 0;
+volatile uint8_t xMotorRunning = 0;
+
+//For moving 10mm
+volatile uint32_t zPulseCount = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -174,6 +184,7 @@ static void SystemPower_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ICACHE_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -217,6 +228,7 @@ int main(void)
   MX_GPIO_Init();
   MX_ICACHE_Init();
   MX_USART1_UART_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -227,32 +239,44 @@ int main(void)
 
   while (1)
   {
-	  leftButtonState = HAL_GPIO_ReadPin(LEFT_Port, LEFT_Pin);
-	  rightButtonState = HAL_GPIO_ReadPin(RIGHT_Port, RIGHT_Pin);
-	  backButtonState = HAL_GPIO_ReadPin(BACK_Port, Back_Pin);
-	  forwardButtonState = HAL_GPIO_ReadPin(FORWARD_Port, FORWARD_Pin);
-	  //Loop until right button is pressed
-	  while(rightButtonState == GPIO_PIN_RESET)
+	  while (1)
 	  {
-		  if (leftButtonState == GPIO_PIN_SET)
-		  {
-			  if (HAL_GetTick() - lastYStep >= stepInterval)
-			  {
-				  yStepState = !yStepState;
-				  HAL_GPIO_WritePin(LEFT_Port, LEFT_Pin, yStepState? GPIO_PIN_SET : GPIO_PIN_RESET);
-				  lastYStep = HAL_GetTick();
-			  }
-		  }
-		  if (forwardButtonState == GPIO_PIN_SET)
-		  {
-			  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, GPIO_PIN_RESET);
-			  if (HAL_GetTick() - lastYStep >= stepInterval)
-			  {
-				  yStepState = !yStepState;
-				  HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, yStepState? GPIO_PIN_SET : GPIO_PIN_RESET);
-				  lastYStep = HAL_GetTick();
-			  }
-		  }
+	      leftButtonState = HAL_GPIO_ReadPin(LEFT_Port, LEFT_Pin);
+
+	      rightButtonState = HAL_GPIO_ReadPin(RIGHT_Port, RIGHT_Pin);
+
+	      forwardButtonState = HAL_GPIO_ReadPin(FORWARD_Port, FORWARD_Pin);
+
+	      if (rightButtonState == GPIO_PIN_RESET)
+	      {
+	          break;
+	      }
+
+	      if (leftButtonState == GPIO_PIN_RESET)
+	      {
+	          if (stepTimerFlag)
+	          {
+
+	          }
+
+	      }
+	      else
+	      {
+	          HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, GPIO_PIN_RESET);
+	          yStepState = 0;
+	      }
+
+	      if (forwardButtonState == GPIO_PIN_RESET)
+	      {
+	          // move X forward
+	      }
+	      else
+	      {
+	          HAL_GPIO_WritePin(XPUL_Port,
+	                            XPUL_Pin,
+	                            GPIO_PIN_RESET);
+	          xStepState = 0;
+	      }
 	  }
 	 //Calibrate the sensors
 	  Z_Calibration();
@@ -374,6 +398,51 @@ static void MX_ICACHE_Init(void)
   /* USER CODE BEGIN ICACHE_Init 2 */
 
   /* USER CODE END ICACHE_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 63;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 499;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+  HAL_TIM_Base_Start_IT(&htim2);
+  /* USER CODE END TIM3_Init 2 */
 
 }
 
@@ -558,186 +627,56 @@ static void MX_GPIO_Init(void)
 //Calibrates the Z-Origin
 void Z_Calibration()
 {
-	  //Begin Z state machine
-	  switch(ZState)
-	  {
-	  	  case Z_IDLE:
-		  {
-	  		  //Not necessary here
-		  }
-	  	  case Z_MOVING_DOWN:
-		  {
-			  //Changed by interrupt
-			  if (zProximityDetected)
-			  {
-				  // Turns motor off
-				  HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+	switch (calState)
+	{
+	    case CAL_Z_DOWN:
+	    	HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
+	    	zMotorRunning  = 1;
+	        break;
 
-				  //resets step state to zero for future use
-				  zStepState = 0;
+	    case CAL_Z_UP:
 
 
-				  zState = Z_MOVING_UP;
-			  }
-			  // Moves down
-			  else
-			  {
-				  //Sets direction to down (hopefully)
-				  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_RESET);
+	        // move exactly 10 mm
+	    	if (zPulseCount >= 500)
+	    	{
+	    	    zMotorRunning = 0;
 
-				  //3.6 ms clock
-				  if (HAL_GetTick() - zLastStepTime >= stepInterval)
-				  {
-					  //switches step state (on or off)
-					  zStepState = !zStepState;
+	    	    HAL_GPIO_WritePin(ZPUL_Port,
+	    	                      ZPUL_Pin,
+	    	                      GPIO_PIN_RESET);
 
-					  HAL_GPIO_WritePin(ZPUL_Port, Z_Pin, zStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
-					  //Resets last step time
-					  zLastStepTime = HAL_GetTick();
-				  }
-			  }
-			  break;
-		  }
-	  	  case Z_WAITING:
-		  {
-	  		  //Not necessary here
-		  }
-	  	  case Z_MOVING_UP:
-		  {
-			  //Move upward for 0.5 seconds to reach 10 mm
-			  //Set direction to up
-			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
-			  if (HAL_GetTick() - zLastStepTime >= 500)
-			  {
-				  zCalibrated = 1;
-			  }
-		  }
+	    	    zPosition = 0;
 
-	  }
+	    	    calState = CAL_Y_RIGHT;
+	    	}
+	        break;
+
+	    case CAL_Y_RIGHT:
+	        // move right until D9 interrupt
+	        break;
+
+	    case CAL_Y_LEFT:
+	        // move exactly 100 mm
+	        break;
+
+	    case CAL_X_BACK:
+	        // move backward until D10 interrupt
+	        break;
+
+	    case CAL_X_FORWARD:
+	        // move measured distance
+	        break;
+
+	    case CAL_WAIT:
+	        // wait 5 seconds
+	        break;
+
+	    case CAL_DONE:
+	        break;
+	}
 }
 
-void Y_Calibration()
-{
-	  //Begin Z state machine
-	  switch(yState)
-	  {
-	  	  case Y_IDLE:
-		  {
-	  		  if (zCalibrated == 1)
-	  		  {
-	  			  yState = Y_MOVING_RIGHT;
-	  		  }
-		  }
-	  	  case Y_MOVING_RIGHT:
-		  {
-			  //Changed by interrupt
-			  if (yProximityDetected)
-			  {
-				  // Turns motor off
-				  HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, GPIO_PIN_RESET);
-
-				  //resets step state to zero for future use
-				  yStepState = 0;
-
-
-				  yState = Y_MOVE_LEFT;
-			  }
-			  // Moves down
-			  else
-			  {
-				  //Sets direction to down (hopefully)
-				  HAL_GPIO_WritePin(YDIR_Port, YDIR_Pin, GPIO_PIN_RESET);
-
-				  //3.6 ms clock
-				  if (HAL_GetTick() - yLastStepTime >= stepInterval)
-				  {
-					  //switches step state (on or off)
-					  yStepState = !yStepState;
-
-					  HAL_GPIO_WritePin(YPUL_Port, Y_Pin, yStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
-					  //Resets last step time
-					  yLastStepTime = HAL_GetTick();
-				  }
-			  }
-			  break;
-		  }
-	  	  case Y_WAITING:
-		  {
-	  		  //Not necessary here
-		  }
-	  	  case Y_MOVING_LEFT:
-		  {
-			  //Move upward for 0.5 seconds to reach 10 mm
-			  //Set direction to up
-			  HAL_GPIO_WritePin(ZDIR_Port, ZDIR_Pin, GPIO_PIN_SET);
-			  if (HAL_GetTick() - zLastStepTime >= 500)
-			  {
-				  zCalibrated = 1;
-			  }
-		  }
-	  }
-}
-
-void X_Calibration()
-{
-	  //Begin Z state machine
-	  switch(xState)
-	  {
-	  	  case X_IDLE:
-		  {
-	  		  if (yCalibrated == 1)
-	  		  {
-	  			  xState = X_MOVING_BACK;
-	  		  }
-		  }
-	  	  case Y_MOVING_BACK:
-		  {
-			  //Changed by interrupt
-			  if (xProximityDetected)
-			  {
-				  // Turns motor off
-				  HAL_GPIO_WritePin(XPUL_Port, XPUL_Pin, GPIO_PIN_RESET);
-
-				  //resets step state to zero for future use
-				  xStepState = 0;
-
-				  xState = X_MOVING_FORWARD;
-			  }
-			  // Moves down
-			  else
-			  {
-				  //Sets direction to down (hopefully)
-				  HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_RESET);
-
-				  //3.6 ms clock
-				  if (HAL_GetTick() - xLastStepTime >= stepInterval)
-				  {
-					  //switches step state (on or off)
-					  xStepState = !xStepState;
-
-					  HAL_GPIO_WritePin(XPUL_Port, X_Pin, xStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
-					  //Resets last step time
-					  xLastStepTime = HAL_GetTick();
-				  }
-			  }
-			  break;
-		  }
-	  	  case X_WAITING:
-		  {
-	  		  //Not necessary here
-		  }
-	  	  case X_MOVING_FORWARD:
-		  {
-			  //Move upward for 0.5 seconds to reach 10 mm
-			  //Set direction to up
-			  HAL_GPIO_WritePin(XDIR_Port, XDIR_Pin, GPIO_PIN_SET);
-			  if (HAL_GetTick() - xLastStepTime >= 500)
-			  {
-				  xCalibrated = 1;
-			  }
-		  }
-	  }
-}
 
 //Interrupt triggered externally
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
@@ -747,9 +686,9 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 	// Z-axis proximity pin triggered
 	if (GPIO_Pin == ZPROX_Pin)
 	{
-		//State machine reads this
 		zProxmityDetected = 1;
-		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+		zMotorRunning = 0;
+	    HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
 
 	}
 	//Symmetrical
@@ -757,12 +696,12 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 	{
 		yProximityDetected = 1;
 
-		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+		yMotorRunning = 0;
 	}
 	else if (GPIO_Pin == XPROX_Pin)
 	{
 		xProximityDetected = 1;
-		HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, GPIO_PIN_RESET);
+		xMotorRunning = 0;
 	}
 
 }
@@ -779,7 +718,33 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
+	if (htim->Instance == TIM2)
+	{
+	    if (zMotorRunning)
+	    {
+	        zStepState = !zStepState;
 
+	        HAL_GPIO_WritePin(ZPUL_Port, ZPUL_Pin, zStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+	        if (zStepState == 1)
+	        {
+	            zPulseCount++;
+	        }
+	    }
+
+	    if (yMotorRunning)
+	    {
+	        yStepState = !yStepState;
+
+	        HAL_GPIO_WritePin(YPUL_Port, YPUL_Pin, yStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+	    }
+
+	    if (xMotorRunning)
+	    {
+	        xStepState = !xStepState;
+
+	        HAL_GPIO_WritePin(XPUL_Port, XPUL_Pin, xStepState ? GPIO_PIN_SET : GPIO_PIN_RESET);
+	    }
+	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM17)
   {
